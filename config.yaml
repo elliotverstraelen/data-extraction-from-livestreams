@@ -29,9 +29,9 @@ sources:
   - name: kabukicho
     url: "https://www.youtube.com/watch?v=DjdUEyjx8GM"
     note: "Kabukicho, Shinjuku, Tokyo (different angle). Busy night street."
-  - name: shibuya
-    url: "https://www.youtube.com/watch?v=pM_NifRh0RQ"
-    note: "Shibuya scramble crossing, Tokyo. Busy at peak hours; has an on-screen AI overlay."
+  - name: samui
+    url: "https://www.youtube.com/watch?v=6MMXJrzT5c0"
+    note: "Chaweng nightlife street, Koh Samui, Thailand. Foreground pedestrians, large and easy to track."
   - name: kusatsu
     url: "https://www.youtube.com/watch?v=GrEEoEmmrKs"
     note: "Kusatsu onsen town, Japan. Lighter foot traffic; a quieter-scene contrast."
@@ -50,7 +50,7 @@ detector:
   tracker: "bytetrack.yaml" # ultralytics tracker config (gives persistent IDs for dwell time)
 
 features:
-  aggregation_seconds: 5     # one aggregated metrics row is written every N seconds
+  aggregation_seconds: 2     # one aggregated metrics row is written every N seconds (low = livelier dashboard)
   dwell_exit_timeout: 3.0    # a tracked person absent this long is counted as "left"
   group_distance_frac: 0.08  # two people closer than this (fraction of frame width) = same group
   capacity: 25               # the crowd size considered "full" -- used to normalise the vibe index
@@ -72,7 +72,7 @@ storage:
   sqlite_db: "public_space.db"
   metrics_csv: "metrics.csv"
   events_csv: "events.csv"
-  heatmap_every_seconds: 30  # how often the hotspot heatmap PNG snapshot is refreshed
+  heatmap_every_seconds: 2   # how often the hotspot heatmap PNG is refreshed (low = livelier dashboard)
 
 mqtt:                        # OPTIONAL -- the "IoT pipeline" story (Part 5). Off by default.
   enabled: false

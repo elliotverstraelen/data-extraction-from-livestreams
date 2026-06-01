@@ -19,7 +19,6 @@ import atexit
 import sqlite3
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pandas as pd
@@ -167,94 +166,105 @@ db_path = st.sidebar.text_input("SQLite database", "data/public_space.db")
 heatmap_path = st.sidebar.text_input("Heatmap image", "data/heatmap_latest.png")
 frame_path = st.sidebar.text_input("Live frame image", "data/latest_frame.jpg")
 auto = st.sidebar.checkbox("Auto-refresh", value=True)
-interval = st.sidebar.slider("Refresh every (s)", 2, 30, 5, disabled=not auto)
+interval = st.sidebar.slider("Stats refresh (s)", 1, 30, 2, disabled=not auto)
 
 
-def schedule_refresh() -> None:
-    """Re-run after `interval` seconds while auto-refresh is on or a capture is
-    running. Called on every exit path -- including the 'no data yet' ones below
-    -- so the view keeps polling and comes alive as soon as the first row lands."""
-    if auto or capture_running():
-        time.sleep(interval)
-        st.rerun()
-
-
-data = load(db_path)
-st.title("Public-Space Vibe Analytics")
-
-if data is None:
-    if capture_running():
-        st.info("Capture starting up -- waiting for the first rows...")
-    else:
-        st.info("No data yet. Pick a source and press Start in the sidebar.")
-    schedule_refresh()
-    st.stop()
-
-metrics, events, tracks = data
-if metrics.empty:
-    st.info("Capture running -- waiting for the first aggregation window...")
-    schedule_refresh()
-    st.stop()
-
-# -- KPI row ---------------------------------------------------------------
-last = metrics.iloc[-1]
-c1, c2, c3, c4, c5, c6 = st.columns(6)
-c1.metric("Current vibe", f"{last['vibe_index']:.0f}")
-c2.metric("People now", f"{last['person_count']:.0f}")
-c3.metric("Peak people", f"{int(metrics['person_count_max'].max())}")
-c4.metric("Unique visitors", f"{int(metrics['visitors_total'].max())}")
-c5.metric("Avg dwell", f"{(tracks['dwell_seconds'].mean() if not tracks.empty else 0):.0f}s")
-c6.metric("Events", f"{len(events)}")
-
-# -- live view: the stream next to the heatmap -----------------------------
-st.subheader("Live view")
+# -- panels, each refreshed by its own fragment ----------------------------
+# Fragments refresh independently without a blocking rerun: the analysed frame
+# updates fast (~0.8s) so it looks live, while the heavier DB-backed panels
+# refresh on the slower `interval`. The embedded video is drawn once in the body
+# below, so it is never reloaded by a refresh.
 live_src = chosen_url
+
+
+# Fixed heights below keep the layout from jumping when a fragment re-mounts
+# its content on refresh: the box reserves its space, so only the pixels inside
+# change (the page around it stays put).
+_IMG_H = 360
+_CHART_H = 240
+
+
+@st.fragment(run_every=(0.5 if auto else None))
+def live_frame_panel():
+    with st.container(height=_IMG_H, border=False):
+        p = Path(frame_path)
+        if p.exists():
+            st.image(p.read_bytes(),
+                     caption="Latest analysed frame (detected people boxed)",
+                     use_container_width=True)
+        else:
+            st.caption("No analysed frame yet -- the capture is warming up.")
+
+
+@st.fragment(run_every=(1.0 if auto else None))
+def heatmap_panel():
+    with st.container(height=_IMG_H, border=False):
+        p = Path(heatmap_path)
+        if p.exists():
+            st.image(p.read_bytes(),
+                     caption="Hotspot heatmap -- where people congregate (warmer = more)",
+                     use_container_width=True)
+        else:
+            st.caption("Heatmap not generated yet.")
+
+
+@st.fragment(run_every=(float(interval) if auto else None))
+def stats_panel():
+    data = load(db_path)
+    if data is None:
+        st.info("Capture starting up -- waiting for the first rows..." if capture_running()
+                else "No data yet. Pick a source and press Start in the sidebar.")
+        return
+    metrics, events, tracks = data
+    if metrics.empty:
+        st.info("Capture running -- waiting for the first aggregation window...")
+        return
+
+    last = metrics.iloc[-1]
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("Current vibe", f"{last['vibe_index']:.0f}")
+    c2.metric("People now", f"{last['person_count']:.0f}")
+    c3.metric("Peak people", f"{int(metrics['person_count_max'].max())}")
+    c4.metric("Unique visitors", f"{int(metrics['visitors_total'].max())}")
+    c5.metric("Avg dwell", f"{(tracks['dwell_seconds'].mean() if not tracks.empty else 0):.0f}s")
+    c6.metric("Events", f"{len(events)}")
+
+    left, right = st.columns(2)
+    with left:
+        st.subheader("Crowd & vibe")
+        st.line_chart(metrics.set_index("time")[["person_count", "vibe_index"]], height=_CHART_H)
+        st.subheader("Social structure (solo vs groups)")
+        st.area_chart(metrics.set_index("time")[["solo_count", "group_count"]], height=_CHART_H)
+    with right:
+        st.subheader("Activity (motion) & brightness")
+        st.line_chart(metrics.set_index("time")[["motion_level", "brightness"]], height=_CHART_H)
+        st.subheader("Dwell-time distribution")
+        if not tracks.empty:
+            hist = pd.cut(tracks["dwell_seconds"], bins=20).value_counts().sort_index()
+            hist.index = [f"{int(i.left)}-{int(i.right)}s" for i in hist.index]
+            st.bar_chart(hist, height=_CHART_H)
+        else:
+            st.container(height=_CHART_H, border=False).caption("No finished visitor tracks yet.")
+
+    st.subheader("Recent events")
+    if not events.empty:
+        st.dataframe(events[["ts", "type", "severity", "message"]].head(25),
+                     use_container_width=True, hide_index=True, height=220)
+    else:
+        st.caption("No events yet.")
+
+
+st.title("Public-Space Vibe Analytics")
+st.subheader("Live view")
 lv1, lv2 = st.columns(2)
 with lv1:
     if isinstance(live_src, str) and live_src.startswith(("http://", "https://")):
         st.video(live_src)
-    if Path(frame_path).exists():
-        # Read bytes each run so the image refreshes as the file is overwritten.
-        st.image(Path(frame_path).read_bytes(),
-                 caption="Latest analysed frame (detected people boxed)",
-                 use_container_width=True)
-    else:
-        st.caption("No analysed frame yet -- waiting for the capture.")
+    live_frame_panel()
 with lv2:
-    if Path(heatmap_path).exists():
-        st.image(Path(heatmap_path).read_bytes(),
-                 caption="Hotspot heatmap -- where people congregate (warmer = more)",
-                 use_container_width=True)
-    else:
-        st.caption("Heatmap not generated yet.")
+    heatmap_panel()
 
-# -- time series -----------------------------------------------------------
-left, right = st.columns(2)
-with left:
-    st.subheader("Crowd & vibe")
-    st.line_chart(metrics.set_index("time")[["person_count", "vibe_index"]])
-    st.subheader("Social structure (solo vs groups)")
-    st.area_chart(metrics.set_index("time")[["solo_count", "group_count"]])
-with right:
-    st.subheader("Activity (motion) & brightness")
-    st.line_chart(metrics.set_index("time")[["motion_level", "brightness"]])
-    st.subheader("Dwell-time distribution")
-    if not tracks.empty:
-        hist = pd.cut(tracks["dwell_seconds"], bins=20).value_counts().sort_index()
-        hist.index = [f"{int(i.left)}-{int(i.right)}s" for i in hist.index]
-        st.bar_chart(hist)
-    else:
-        st.caption("No finished visitor tracks yet.")
-
-# -- event log -------------------------------------------------------------
-st.subheader("Recent events")
-if not events.empty:
-    st.dataframe(events[["ts", "type", "severity", "message"]].head(25),
-                 use_container_width=True, hide_index=True)
-else:
-    st.caption("No events yet.")
+stats_panel()
 
 st.caption("Each camera node writes to CSV + SQLite (+ optional MQTT). "
            "At city scale these streams fan into a time-series DB / data lake for fleet-wide analytics.")
-
-schedule_refresh()

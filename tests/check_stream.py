@@ -21,6 +21,7 @@ import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.config import load_config  # noqa: E402
 from src.detector import Detector  # noqa: E402
 from src.stream import StreamReader  # noqa: E402
 from src.visualize import draw_boxes  # noqa: E402
@@ -28,14 +29,16 @@ from src.visualize import draw_boxes  # noqa: E402
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Verify a livestream source.")
-    ap.add_argument("--source", required=True)
+    ap.add_argument("--source", required=True,
+                    help="a preset name (see config.yaml), or a raw URL / file / webcam index")
     ap.add_argument("--frames", type=int, default=30)
     ap.add_argument("--backend", choices=["auto", "yolo", "hog"], default="yolo")
     ap.add_argument("--out", default="data/stream_check.jpg")
     args = ap.parse_args()
 
-    print(f"[check] opening {args.source!r} ...")
-    reader = StreamReader(source=args.source, process_width=960)
+    source = load_config().resolve_source(args.source)   # preset name -> URL, else as-is
+    print(f"[check] opening {source!r} ...")
+    reader = StreamReader(source=source, process_width=960)
     try:
         reader.start()
     except Exception as exc:

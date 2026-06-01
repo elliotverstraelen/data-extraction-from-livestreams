@@ -199,7 +199,7 @@ python main.py --source "https://..."  # or any raw URL / file path / webcam ind
 |---|---|---|
 | `shinjuku` *(default)* | Tokyo night street, dense crowd | main crowd-analytics demo |
 | `kabukicho` | Tokyo night street, alt angle | crowd demo / second scene |
-| `shibuya` | Shibuya Scramble Crossing | busy peaks *(has an on-screen AI overlay)* |
+| `samui` | Koh Samui nightlife street (TH) | large foreground pedestrians |
 | `kusatsu` | onsen town, lighter traffic | a quieter-scene contrast |
 | `webcam` | local camera index 0 | fully offline |
 | `sample` | bundled looping clip | fully offline demo / grading |
@@ -274,6 +274,26 @@ CLI flags: `--source <name|URL|path>`, `--pick`, `--list-sources`,
 The live window (and the dashboard's "Latest analysed frame") shows detection
 boxes + track IDs; the dashboard also has KPIs, a colour-coded vibe trend, the
 hotspot heatmap, dwell distribution and the event log.
+
+### 7.1 How the dashboard updates live (and stays smooth)
+
+The capture and the dashboard are separate processes that talk only through the
+files in `data/` -- the same loose coupling a real fleet would use. The pipeline
+writes a fresh annotated frame (`latest_frame.jpg`, ~3x/second) and heatmap
+(`heatmap_latest.png`, ~every 2s) using a temp-file-plus-atomic-rename, so a
+reader never catches a half-written image.
+
+On the dashboard side, each panel is an `st.fragment` with its own `run_every`,
+so they refresh **independently and partially** instead of reloading the whole
+page: the analysed frame ~2x/second (so it looks like live video), the heatmap
+~1x/second, and the KPIs/charts on the stats interval (default 2s). The embedded
+YouTube video is drawn once outside any fragment, so a refresh never reloads it.
+
+To avoid a layout shift each time a fragment re-mounts its content, the images
+sit in fixed-height containers and the charts have explicit heights -- the boxes
+reserve their space, so only the pixels inside change while everything around
+them stays put. `aggregation_seconds` (how often a metrics row is written) is set
+low so the numbers and charts move in near-real time.
 
 ---
 

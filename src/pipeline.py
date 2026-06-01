@@ -66,6 +66,8 @@ class Pipeline:
         start = time.time()
         last_agg = start
         last_heat = start
+        last_frame = start
+        frame_every = 0.3          # how often to refresh the dashboard's live frame
         agg_every = self.cfg.features.aggregation_seconds
         heat_every = self.cfg.storage.heatmap_every_seconds
         min_dt = (1.0 / self.cfg.stream.target_fps) if self.cfg.stream.target_fps > 0 else 0.0
@@ -108,16 +110,24 @@ class Pipeline:
                         for ev in all_events:
                             self._recent_events.append(ev)
                             print(f"   >> EVENT [{ev.severity}] {ev.message}")
-
-                    # Save the latest annotated frame so the dashboard can show a
-                    # live view to compare against the heatmap.
-                    cv2.imwrite(str(self.storage.frame_path),
-                                draw_boxes(frame.copy(), detections))
                     last_agg = ts
 
-                # -- heatmap snapshot ------------------------------------
+                # -- live annotated frame (for the dashboard) ------------
+                # Saved several times a second, independent of the slower
+                # aggregation, so the dashboard's live view looks responsive.
+                # Written via a temp file + atomic rename so a reader never
+                # picks up a half-written image.
+                if ts - last_frame >= frame_every:
+                    tmp = self.storage.frame_path.with_suffix(".tmp.jpg")
+                    cv2.imwrite(str(tmp), draw_boxes(frame.copy(), detections))
+                    tmp.replace(self.storage.frame_path)
+                    last_frame = ts
+
+                # -- heatmap snapshot (atomic, like the frame) -----------
                 if ts - last_heat >= heat_every:
-                    self.features.heatmap.save(str(self.storage.heatmap_path))
+                    tmp = self.storage.heatmap_path.with_suffix(".tmp.png")
+                    if self.features.heatmap.save(str(tmp)):
+                        tmp.replace(self.storage.heatmap_path)
                     last_heat = ts
 
                 # -- display ---------------------------------------------
