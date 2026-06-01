@@ -34,13 +34,7 @@ sources:
     note: "Shibuya scramble crossing, Tokyo. Busy at peak hours; has an on-screen AI overlay."
   - name: kusatsu
     url: "https://www.youtube.com/watch?v=GrEEoEmmrKs"
-    note: "Kusatsu onsen town, Japan. Scenic and usually sparse; a quiet-scene contrast."
-  - name: nyc_skyline
-    url: "https://www.youtube.com/watch?v=VGnFLdQW39A"
-    note: "NYC rooftop skyline. No people in frame; lighting/scene demos only."
-  - name: watertown
-    url: "https://www.youtube.com/watch?v=Zz9hMrxl20I"
-    note: "Public square, Watertown NY. Backup; often empty."
+    note: "Kusatsu onsen town, Japan. Lighter foot traffic; a quieter-scene contrast."
   - name: webcam
     url: "0"
     note: "Local webcam (index 0). Fully offline."

@@ -200,9 +200,7 @@ python main.py --source "https://..."  # or any raw URL / file path / webcam ind
 | `shinjuku` *(default)* | Tokyo night street, dense crowd | main crowd-analytics demo |
 | `kabukicho` | Tokyo night street, alt angle | crowd demo / second scene |
 | `shibuya` | Shibuya Scramble Crossing | busy peaks *(has an on-screen AI overlay)* |
-| `kusatsu` | onsen town, usually sparse | a calm "quiet scene" contrast |
-| `nyc_skyline` | rooftop skyline, **no people** | lighting/scene only - not crowds |
-| `watertown` | town square (often empty) | backup |
+| `kusatsu` | onsen town, lighter traffic | a quieter-scene contrast |
 | `webcam` | local camera index 0 | fully offline |
 | `sample` | bundled looping clip | fully offline demo / grading |
 
@@ -247,7 +245,8 @@ streamlit run dashboard.py
 The dashboard starts a capture of the default source by itself, so you don't need
 a second terminal. It opens at http://localhost:8501 and shows the live stream
 next to the hotspot heatmap, the KPIs, time-series and event log, all updating
-live. In the sidebar you can pick a different source and Start/Stop the capture;
+live. In the sidebar you can pick a different source (it switches automatically),
+Start/Stop the capture, or Clear data to wipe the DB/heatmap and start fresh.
 Auto-refresh is on by default.
 
 > The capture runs as a background `python main.py` process that the dashboard

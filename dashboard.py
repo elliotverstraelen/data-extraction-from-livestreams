@@ -15,6 +15,7 @@ updates live while the capture runs.
 """
 from __future__ import annotations
 
+import atexit
 import sqlite3
 import subprocess
 import sys
@@ -52,8 +53,19 @@ def load(db_path: str):
 
 
 # -- capture control: run the pipeline straight from the dashboard ----------
+# One shared handle across every session and rerun, so websocket reconnects (the
+# blocking refresh below drops the socket each cycle) can't spawn duplicate
+# captures. cache_resource returns the same dict for the server's lifetime.
+@st.cache_resource
+def _capture_state() -> dict:
+    return {"proc": None, "source": None, "started": False}
+
+
+CM = _capture_state()
+
+
 def capture_running() -> bool:
-    proc = st.session_state.get("capture_proc")
+    proc = CM["proc"]
     return proc is not None and proc.poll() is None
 
 
@@ -63,20 +75,50 @@ def start_capture(source_name: str) -> None:
         return
     url = CFG.resolve_source(source_name)
     CAPTURE_LOG.parent.mkdir(parents=True, exist_ok=True)
-    st.session_state.capture_proc = subprocess.Popen(
+    CM["proc"] = subprocess.Popen(
         [sys.executable, str(MAIN_PY), "--no-window", "--source", url],
         cwd=str(ROOT),
         stdout=CAPTURE_LOG.open("ab"),
         stderr=subprocess.STDOUT,
     )
-    st.session_state.capture_source = url
+    CM["source"] = url
 
 
 def stop_capture() -> None:
-    proc = st.session_state.get("capture_proc")
+    proc = CM["proc"]
     if proc is not None and proc.poll() is None:
         proc.terminate()
-    st.session_state.capture_proc = None
+        try:
+            proc.wait(timeout=5)          # let it release the SQLite file
+        except Exception:
+            proc.kill()
+    CM["proc"] = None
+
+
+atexit.register(stop_capture)   # don't leave the capture orphaned on shutdown
+
+
+def clear_data(source_name: str) -> None:
+    """Delete the generated data (DB, CSVs, heatmap, frame, log) for a fresh
+    session. Stops the capture first so it releases the files, then restarts it
+    on the same source if it was running."""
+    was_running = capture_running()
+    stop_capture()
+    out = Path(CFG.storage.out_dir)
+    db = out / CFG.storage.sqlite_db
+    targets = [
+        db, db.with_name(db.name + "-wal"), db.with_name(db.name + "-shm"),
+        out / CFG.storage.metrics_csv, out / CFG.storage.events_csv,
+        out / "heatmap_latest.png", out / "latest_frame.jpg", out / "capture.log",
+    ]
+    for p in targets:
+        try:
+            p.unlink()
+        except (FileNotFoundError, PermissionError, OSError):
+            pass
+    load.clear()
+    if was_running:
+        start_capture(source_name)
 
 
 # -- sidebar ---------------------------------------------------------------
@@ -88,16 +130,16 @@ default_idx = next((i for i, s in enumerate(CFG.sources) if s["url"] == CFG.stre
 chosen = st.sidebar.selectbox("Source", preset_names, index=default_idx)
 chosen_url = CFG.resolve_source(chosen)
 
-# Auto-start a capture once per browser session (single `streamlit run`, no
-# second terminal). After that, changing the Source dropdown while a capture is
-# running restarts it on the newly selected source.
-if "capture_proc" not in st.session_state:
-    st.session_state.capture_proc = None
+# Auto-start a capture the first time the server runs (single `streamlit run`,
+# no second terminal). After that, changing the Source dropdown while a capture
+# is running restarts it on the newly selected source.
+if not CM["started"]:
+    CM["started"] = True
     try:
         start_capture(chosen)
     except Exception as exc:
         st.sidebar.error(f"Could not start capture: {exc}")
-elif capture_running() and st.session_state.get("capture_source") != chosen_url:
+elif capture_running() and CM["source"] != chosen_url:
     stop_capture()
     start_capture(chosen)
     st.rerun()
@@ -108,6 +150,11 @@ if c_start.button("Start", use_container_width=True, disabled=capture_running())
     st.rerun()
 if c_stop.button("Stop", use_container_width=True, disabled=not capture_running()):
     stop_capture()
+    st.rerun()
+
+if st.sidebar.button("Clear data", use_container_width=True,
+                     help="Wipe the DB, CSVs, heatmap and frame, then start fresh."):
+    clear_data(chosen)
     st.rerun()
 
 if capture_running():
@@ -136,7 +183,10 @@ data = load(db_path)
 st.title("Public-Space Vibe Analytics")
 
 if data is None:
-    st.warning(f"No database at `{db_path}` yet. The capture is starting up...")
+    if capture_running():
+        st.info("Capture starting up -- waiting for the first rows...")
+    else:
+        st.info("No data yet. Pick a source and press Start in the sidebar.")
     schedule_refresh()
     st.stop()
 
