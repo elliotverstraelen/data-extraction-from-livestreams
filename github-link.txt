@@ -1,0 +1,6 @@
+Public-Space Vibe Analytics - Data Extraction from Livestreams
+GitHub repository (public):
+
+https://github.com/elliotverstraelen/data-extraction-from-livestreams
+
+Raw data results are in the repo under: samples/
