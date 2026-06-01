@@ -49,13 +49,14 @@ configurable per location in `config.yaml`.
 
 ## 2. Architecture / pipeline
 
-```
-                                                    ┌────────── Big Data context (Part 5) ──────────┐
- livestream     frame        feature        event   │  CSV  ┐                                        │
- (YouTube/  →  capture   →  extraction  →  generation→ SQLite ├→ dashboard.py (Streamlit, live KPIs)  │
-  HLS/RTSP)    (threaded,   (YOLO+track,   (rolling   │  MQTT ┘   analyze.py  (offline charts/report) │
-               latest      heatmap,dwell,  baseline,  │           …or fan-in to a city-wide TSDB/lake │
-               frame)      groups,light)   cooldowns) └───────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    A["Livestream<br/>YouTube / HLS / RTSP"] --> B["Frame capture<br/>threaded, latest frame"]
+    B --> C["Detect + track<br/>YOLO + ByteTrack"]
+    C --> D["Feature extraction<br/>crowd, dwell, groups,<br/>motion, light, heatmap, vibe"]
+    D --> E["Event generation<br/>rolling baseline"]
+    E --> F["Storage<br/>CSV / SQLite / MQTT"]
+    F --> G["Dashboard + report<br/>Streamlit, analyze.py"]
 ```
 
 | Stage | File | Assignment part |
@@ -105,22 +106,9 @@ to keep the stream meaningful.
 | `lighting_change` | info | day/night/overcast transition detected |
 | `loiter` | warning | a single visitor lingers beyond `loiter_seconds` |
 
-### 4.1 Debouncing `lighting_change`
-
-`lighting_change` comes from mean frame brightness, which `classify_light()`
-buckets into `night` / `dusk/dawn` / `overcast` / `bright/sunny` at fixed cut-offs
-(0.18, 0.35, 0.55). Brightness jitters by a few percent on any real stream (clouds,
-auto-exposure, neon at night), so when it sits near a cut-off the label flips back
-and forth every window and fires an event each time. Early test runs produced
-dozens of these on a single night scene.
-
-The fix is to debounce on persistence: a label different from the current one is
-kept as a candidate, and only becomes the reported state (firing one event) after
-it has held for `light_min_windows` windows in a row (default 3). A one- or
-two-window blip never crosses that threshold. Because the rule is about how long
-the new label persists rather than the exact brightness values, it needs no
-per-camera tuning. The state machine is a few lines in `EventEngine.evaluate()`
-(`src/events.py`); the threshold is `events.light_min_windows` in `config.yaml`.
+Events that depend on a noisy signal are debounced so the stream stays meaningful
+(e.g. `lighting_change` only fires after a new light state holds for a few windows).
+See [docs/engineering-notes.md](docs/engineering-notes.md) for the details.
 
 ---
 
@@ -204,34 +192,12 @@ python main.py --source "https://..."  # or any raw URL / file path / webcam ind
 | `webcam` | local camera index 0 | fully offline |
 | `sample` | bundled looping clip | fully offline demo / grading |
 
-> **Live URLs rotate**, and a busy plaza can be empty at 4 a.m. local time. Before
-> relying on any source, confirm it with the bundled checker - it reports
-> live?/resolution/people-count and saves an annotated preview to
-> `data/stream_check.jpg`:
-> ```bash
-> python tests/check_stream.py --source "<URL or preset name>"
-> ```
+> **Live URLs rotate**, and a busy plaza can be empty at 4 a.m. local time. Confirm
+> any source before relying on it (reports live?/resolution/people-count and saves a
+> preview): `python tests/check_stream.py --source "<URL or preset name>"`.
 
-### 6.1 Why YouTube live needs the Android player client
-
-Reading a YouTube live stream through OpenCV used to hang for about 30 seconds and
-then report no frames. The cause is not OpenCV: yt-dlp resolves the page fine, but
-the segment URLs from the default (`web`) player client are answered by Google with
-HTTP 403 on a direct fetch. FFmpeg, inside OpenCV, keeps retrying the 403'ing `.ts`
-segments until its 30-second timeout fires, which looks like a freeze. Requesting
-the `android` player client instead returns segment URLs that play directly. It is
-a one-line option in `src/stream.py`:
-```python
-"extractor_args": {"youtube": {"player_client": ["android"]}}
-```
-
-**Finding your own** - reliable source types:
-- **YouTube live** - search *"live cam crossing"*, *"24/7 city live"*, *"shibuya
-  live"*. Copy the watch URL; `yt-dlp` + the Android-client fix above resolve it.
-- **Direct HLS** (`…/playlist.m3u8`) - many municipal/tourism webcams; these need
-  no `yt-dlp` and open straight in OpenCV. Browse <https://www.skylinewebcams.com>.
-- **Local file** - for fully offline testing/grading, use `sample` or the generator
-  (`python tests/make_sample_video.py`).
+Finding your own source and a note on why YouTube live needs yt-dlp's Android player
+client are in [docs/engineering-notes.md](docs/engineering-notes.md).
 
 ---
 
@@ -276,30 +242,10 @@ The live window (and the dashboard's "Latest analysed frame") shows detection
 boxes + track IDs; the dashboard also has KPIs, a colour-coded vibe trend, the
 hotspot heatmap, dwell distribution and the event log.
 
-### 7.1 How the dashboard updates live (and stays smooth)
-
-The capture and the dashboard are separate processes that talk only through the
-files in `data/` -- the same loose coupling a real fleet would use. The pipeline
-writes a fresh annotated frame (`latest_frame.jpg`, ~3x/second) and heatmap
-(`heatmap_latest.png`, ~every 2s) using a temp-file-plus-atomic-rename, so a
-reader never catches a half-written image.
-
-On the dashboard side, each panel is an `st.fragment` with its own `run_every`,
-so they refresh **independently and partially** instead of reloading the whole
-page. The fast, smooth panels are separated from the slow one: the live view
-(analysed frame + heatmap, side by side at the same size) refreshes ~1.4x/second
-so it looks like live video, the KPIs every 2s, and the charts on the slower
-"Charts refresh" interval (default 5s). A link to the original video feed sits
-underneath the live view.
-
-The frame and heatmap update by swapping the image, which is smooth. The charts,
-being Vega, *redraw* when their fragment re-runs -- that is a Streamlit limitation,
-so they live in their own slower fragment to keep the redraw infrequent (raise
-"Charts refresh" for less flicker, lower it for fresher charts). Charts have
-explicit heights so a redraw never shifts the page, and both live-view images are
-built inside a single fragment with equal columns so they always render at the
-same size. `aggregation_seconds` (how often a metrics row is written) is set low
-so the numbers move in near-real time.
+The dashboard launches the capture as a background process and refreshes each
+panel independently (the live frame + heatmap update a few times a second; the
+charts on the slower "Charts refresh" interval). How that is built to stay smooth
+is described in [docs/engineering-notes.md](docs/engineering-notes.md).
 
 ---
 
@@ -311,8 +257,7 @@ a safe default in `src/config.py`). Highlights:
 - `stream.source`, `stream.process_width`, `stream.target_fps`
 - `detector.backend / model / conf`
 - `features.aggregation_seconds`, `dwell_exit_timeout`, `group_distance_frac`, `capacity`
-- `events.*` thresholds (z-score, density, quiet, loiter, cooldown,
-  `light_min_windows` - the lighting-change debounce, see §4.1)
+- `events.*` thresholds (z-score, density, quiet, loiter, cooldown, `light_min_windows`)
 - `sources` - the source-picker menu (see §6)
 - `mqtt.enabled` (+ host/port/topic) for the IoT story
 - `display.show_window`, `display.show_heatmap_overlay`
@@ -324,19 +269,17 @@ a safe default in `src/config.py`). Highlights:
 This program is **one camera node**. The design is deliberately the per-node
 slice of a fleet-scale pipeline:
 
-```
-[ N camera nodes ]  →  edge feature extraction (this app, only ~14 numbers/window,
-                       NOT raw video → cheap to transmit, privacy-friendly)
-        │  MQTT topics  publicspace/metrics , publicspace/events
-        ▼
-[ broker / ingestion ]  (Mosquitto / Kafka)
-        ▼
-[ time-series DB / data lake ]  (TimescaleDB / InfluxDB / Parquet on S3)
-        ▼
-[ batch + stream analytics ]   trends by hour/weekday, cross-camera correlation,
-                               anomaly alerting, ML on dwell/vibe
-        ▼
-[ dashboards / APIs ]          city operations, tourism, retail siting
+```mermaid
+flowchart TD
+    A["N camera nodes: edge feature extraction (this app)<br/>~14 numbers/window, not raw video, cheap + privacy-friendly"]
+    B["Broker / ingestion<br/>Mosquitto / Kafka"]
+    C["Time-series DB / data lake<br/>TimescaleDB / InfluxDB / Parquet on S3"]
+    D["Batch + stream analytics<br/>trends by hour/weekday, cross-camera correlation,<br/>anomaly alerting, ML on dwell/vibe"]
+    E["Dashboards / APIs<br/>city operations, tourism, retail siting"]
+    A -->|"MQTT: publicspace/metrics, publicspace/events"| B
+    B --> C
+    C --> D
+    D --> E
 ```
 
 Why this scales:
@@ -378,7 +321,10 @@ mosquitto_sub -t 'publicspace/#' -v        # watch metrics + events stream out l
 │   └── pipeline.py         # orchestration loop
 ├── tests/
 │   ├── smoke_test.py       # end-to-end check, no model/network needed
+│   ├── check_stream.py     # verify a source is live + has people
 │   └── make_sample_video.py# synthetic clip for offline runs
+├── samples/                # real sample output (the raw-data deliverable)
+├── docs/                   # engineering notes + video scripts
 └── data/                   # generated CSV / SQLite / heatmap / report (gitignored)
 ```
 
