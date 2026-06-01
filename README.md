@@ -391,7 +391,7 @@ mosquitto_sub -t 'publicspace/#' -v        # watch metrics + events stream out l
 - [x] **Event generation (20%)** - 6 event types with adaptive baselines + cooldowns.
 - [x] **Data storage (15%)** - CSV + SQLite (3 tables) + optional MQTT.
 - [x] **Analysis & motivation (15%)** - dashboard, report charts, §1 & §9 above.
-- [ ] **Raw data** - commit a sample `data/metrics.csv` / `data/events.csv` (or a link).
+- [x] **Raw data** - real sample output committed under [`samples/`](samples/) (metrics, events, tracks, heatmap, annotated frame).
 - [ ] **Videos** - record the 2-min explainer + the live-demo screencast.
 
 > **Tip for the screencast:** just run `streamlit run dashboard.py` -- it starts
