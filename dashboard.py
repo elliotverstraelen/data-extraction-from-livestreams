@@ -86,15 +86,21 @@ st.sidebar.header("Capture")
 preset_names = [s["name"] for s in CFG.sources]
 default_idx = next((i for i, s in enumerate(CFG.sources) if s["url"] == CFG.stream.source), 0)
 chosen = st.sidebar.selectbox("Source", preset_names, index=default_idx)
+chosen_url = CFG.resolve_source(chosen)
 
-# Auto-start a capture once per browser session, so a single `streamlit run`
-# launches the whole pipeline without a second terminal.
+# Auto-start a capture once per browser session (single `streamlit run`, no
+# second terminal). After that, changing the Source dropdown while a capture is
+# running restarts it on the newly selected source.
 if "capture_proc" not in st.session_state:
     st.session_state.capture_proc = None
     try:
         start_capture(chosen)
     except Exception as exc:
         st.sidebar.error(f"Could not start capture: {exc}")
+elif capture_running() and st.session_state.get("capture_source") != chosen_url:
+    stop_capture()
+    start_capture(chosen)
+    st.rerun()
 
 c_start, c_stop = st.sidebar.columns(2)
 if c_start.button("Start", use_container_width=True, disabled=capture_running()):
@@ -152,7 +158,7 @@ c6.metric("Events", f"{len(events)}")
 
 # -- live view: the stream next to the heatmap -----------------------------
 st.subheader("Live view")
-live_src = st.session_state.get("capture_source") or CFG.stream.source
+live_src = chosen_url
 lv1, lv2 = st.columns(2)
 with lv1:
     if isinstance(live_src, str) and live_src.startswith(("http://", "https://")):
