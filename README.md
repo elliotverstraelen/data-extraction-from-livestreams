@@ -243,9 +243,10 @@ a one-line option in `src/stream.py`:
 streamlit run dashboard.py
 ```
 The dashboard starts a capture of the default source by itself, so you don't need
-a second terminal. It opens at http://localhost:8501 and shows the live stream
-next to the hotspot heatmap, the KPIs, time-series and event log, all updating
-live. In the sidebar you can pick a different source (it switches automatically),
+a second terminal. It opens at http://localhost:8501 and shows the latest
+analysed frame next to the hotspot heatmap, the KPIs, time-series and event log,
+all updating live (with a link to the original video feed). In the sidebar you
+can pick a different source (it switches automatically),
 Start/Stop the capture, or Clear data to wipe the DB/heatmap and start fresh.
 Auto-refresh is on by default.
 
@@ -285,15 +286,20 @@ reader never catches a half-written image.
 
 On the dashboard side, each panel is an `st.fragment` with its own `run_every`,
 so they refresh **independently and partially** instead of reloading the whole
-page: the analysed frame ~2x/second (so it looks like live video), the heatmap
-~1x/second, and the KPIs/charts on the stats interval (default 2s). The embedded
-YouTube video is drawn once outside any fragment, so a refresh never reloads it.
+page. The fast, smooth panels are separated from the slow one: the live view
+(analysed frame + heatmap, side by side at the same size) refreshes ~1.4x/second
+so it looks like live video, the KPIs every 2s, and the charts on the slower
+"Charts refresh" interval (default 5s). A link to the original video feed sits
+underneath the live view.
 
-To avoid a layout shift each time a fragment re-mounts its content, the images
-sit in fixed-height containers and the charts have explicit heights -- the boxes
-reserve their space, so only the pixels inside change while everything around
-them stays put. `aggregation_seconds` (how often a metrics row is written) is set
-low so the numbers and charts move in near-real time.
+The frame and heatmap update by swapping the image, which is smooth. The charts,
+being Vega, *redraw* when their fragment re-runs -- that is a Streamlit limitation,
+so they live in their own slower fragment to keep the redraw infrequent (raise
+"Charts refresh" for less flicker, lower it for fresher charts). Charts have
+explicit heights so a redraw never shifts the page, and both live-view images are
+built inside a single fragment with equal columns so they always render at the
+same size. `aggregation_seconds` (how often a metrics row is written) is set low
+so the numbers move in near-real time.
 
 ---
 
@@ -389,6 +395,6 @@ mosquitto_sub -t 'publicspace/#' -v        # watch metrics + events stream out l
 - [ ] **Videos** - record the 2-min explainer + the live-demo screencast.
 
 > **Tip for the screencast:** just run `streamlit run dashboard.py` -- it starts
-> the capture itself and shows the live stream next to the heatmap with the KPIs
+> the capture itself and shows the analysed frame next to the heatmap with the KPIs
 > filling in, so the whole demo is one screen. Use `python analyze.py` afterwards
 > to produce the summary charts for the explainer.

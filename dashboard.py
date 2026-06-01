@@ -166,7 +166,9 @@ db_path = st.sidebar.text_input("SQLite database", "data/public_space.db")
 heatmap_path = st.sidebar.text_input("Heatmap image", "data/heatmap_latest.png")
 frame_path = st.sidebar.text_input("Live frame image", "data/latest_frame.jpg")
 auto = st.sidebar.checkbox("Auto-refresh", value=True)
-interval = st.sidebar.slider("Stats refresh (s)", 1, 30, 2, disabled=not auto)
+interval = st.sidebar.slider("Charts refresh (s)", 2, 30, 5, disabled=not auto,
+                             help="Charts redraw on each refresh (a Streamlit limitation); "
+                                  "a higher value means less flicker. The frame, heatmap and KPIs refresh faster.")
 
 
 # -- panels, each refreshed by its own fragment ----------------------------
@@ -177,39 +179,39 @@ interval = st.sidebar.slider("Stats refresh (s)", 1, 30, 2, disabled=not auto)
 live_src = chosen_url
 
 
-# Fixed heights below keep the layout from jumping when a fragment re-mounts
-# its content on refresh: the box reserves its space, so only the pixels inside
-# change (the page around it stays put).
-_IMG_H = 360
+# Images use width="stretch" to fill their (equal) columns, so the analysed frame
+# and the heatmap always render at the same size. Charts get an explicit height so
+# they keep their footprint (no page shift) when they redraw. The fast panels
+# (frame/heatmap/KPIs) and the slower charts panel are separate fragments, so the
+# heavier chart redraw happens only on the (slower) charts interval.
 _CHART_H = 240
 
 
-@st.fragment(run_every=(0.5 if auto else None))
-def live_frame_panel():
-    with st.container(height=_IMG_H, border=False):
+@st.fragment(run_every=(0.7 if auto else None))
+def live_view_panel():
+    # Both images live in ONE fragment that builds its own equal columns. A
+    # fragment that auto-reruns renders in isolation, so columns created *outside*
+    # it lose their width on refresh (the images end up different sizes); creating
+    # the columns inside the fragment keeps them equal on every refresh.
+    col_frame, col_heat = st.columns(2, vertical_alignment="top")
+    with col_frame:
         p = Path(frame_path)
         if p.exists():
-            st.image(p.read_bytes(),
-                     caption="Latest analysed frame (detected people boxed)",
-                     use_container_width=True)
+            st.image(p.read_bytes(), width="stretch",
+                     caption="Latest analysed frame (detected people boxed)")
         else:
             st.caption("No analysed frame yet -- the capture is warming up.")
-
-
-@st.fragment(run_every=(1.0 if auto else None))
-def heatmap_panel():
-    with st.container(height=_IMG_H, border=False):
+    with col_heat:
         p = Path(heatmap_path)
         if p.exists():
-            st.image(p.read_bytes(),
-                     caption="Hotspot heatmap -- where people congregate (warmer = more)",
-                     use_container_width=True)
+            st.image(p.read_bytes(), width="stretch",
+                     caption="Hotspot heatmap -- where people congregate (warmer = more)")
         else:
             st.caption("Heatmap not generated yet.")
 
 
-@st.fragment(run_every=(float(interval) if auto else None))
-def stats_panel():
+@st.fragment(run_every=(2.0 if auto else None))
+def kpi_panel():
     data = load(db_path)
     if data is None:
         st.info("Capture starting up -- waiting for the first rows..." if capture_running()
@@ -219,7 +221,6 @@ def stats_panel():
     if metrics.empty:
         st.info("Capture running -- waiting for the first aggregation window...")
         return
-
     last = metrics.iloc[-1]
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Current vibe", f"{last['vibe_index']:.0f}")
@@ -229,6 +230,13 @@ def stats_panel():
     c5.metric("Avg dwell", f"{(tracks['dwell_seconds'].mean() if not tracks.empty else 0):.0f}s")
     c6.metric("Events", f"{len(events)}")
 
+
+@st.fragment(run_every=(float(interval) if auto else None))
+def charts_panel():
+    data = load(db_path)
+    if data is None or data[0].empty:
+        return
+    metrics, events, tracks = data
     left, right = st.columns(2)
     with left:
         st.subheader("Crowd & vibe")
@@ -244,7 +252,7 @@ def stats_panel():
             hist.index = [f"{int(i.left)}-{int(i.right)}s" for i in hist.index]
             st.bar_chart(hist, height=_CHART_H)
         else:
-            st.container(height=_CHART_H, border=False).caption("No finished visitor tracks yet.")
+            st.caption("No finished visitor tracks yet.")
 
     st.subheader("Recent events")
     if not events.empty:
@@ -256,15 +264,12 @@ def stats_panel():
 
 st.title("Public-Space Vibe Analytics")
 st.subheader("Live view")
-lv1, lv2 = st.columns(2)
-with lv1:
-    if isinstance(live_src, str) and live_src.startswith(("http://", "https://")):
-        st.video(live_src)
-    live_frame_panel()
-with lv2:
-    heatmap_panel()
+live_view_panel()
+if isinstance(live_src, str) and live_src.startswith(("http://", "https://")):
+    st.link_button("Open the live video feed", live_src)
 
-stats_panel()
+kpi_panel()
+charts_panel()
 
 st.caption("Each camera node writes to CSV + SQLite (+ optional MQTT). "
            "At city scale these streams fan into a time-series DB / data lake for fleet-wide analytics.")
