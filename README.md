@@ -10,6 +10,22 @@ place - not just a head count, but how **busy**, **active**, **social**, and
 stay. It generates **events** when something noteworthy happens and stores
 everything to **CSV + SQLite (+ optional MQTT)** for downstream Big Data use.
 
+## Quick start
+
+```bash
+git clone https://github.com/elliotverstraelen/data-extraction-from-livestreams.git
+cd data-extraction-from-livestreams
+
+python -m venv .venv && source .venv/bin/activate     # Windows: py -m venv .venv ; .\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+streamlit run dashboard.py                            # live dashboard at http://localhost:8501
+# or run the capture on its own:  python main.py
+```
+
+The YOLO weights (`yolov8n.pt`, ~6 MB) download automatically on first run. Full
+install details, including a no-PyTorch fallback, are in [§5](#5-installation).
+
 ---
 
 ## 1. What information is extracted, and why is it useful?
