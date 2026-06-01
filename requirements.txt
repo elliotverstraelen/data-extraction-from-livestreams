@@ -1,0 +1,24 @@
+# --- Core (required) ---
+opencv-python>=4.8.0          # video capture + image processing (Part 1 & 2)
+numpy>=1.24,<2.2             # array math
+pandas>=2.0.0               # CSV / dataframe handling for analysis
+PyYAML>=6.0                 # config file
+
+# --- Stream resolution (required for YouTube / HLS livestreams) ---
+yt-dlp>=2024.1.1            # resolves a YouTube live URL into a playable stream URL
+
+# --- Detection + tracking (recommended) ---
+# Provides YOLO person detection AND multi-object tracking (ByteTrack) for
+# persistent IDs, which is what makes dwell-time measurement possible.
+# If you cannot install torch, the app automatically falls back to OpenCV's
+# built-in HOG people detector (no tracking, lower accuracy) -- see README.
+ultralytics>=8.1.0
+lap>=0.5.12                 # linear-assignment solver required by the ByteTrack tracker
+
+# --- Dashboard (recommended for the Big Data / analysis deliverable) ---
+streamlit>=1.30.0
+matplotlib>=3.7.0           # used by analyze.py for the static report
+
+# --- Optional: IoT message bus (Part 4 / Part 5 story) ---
+# Only needed if you enable MQTT in config.yaml. Safe to leave installed.
+paho-mqtt>=1.6.0

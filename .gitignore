@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# YOLO model weights (downloaded on first run)
+*.pt
+
+# Generated data / outputs (commit a SAMPLE instead, see README)
+data/*.csv
+data/*.db
+data/*.db-shm
+data/*.db-wal
+data/*.sqlite
+data/sample_walk.mp4
+data/report/*.png
+data/heatmap_*.png
+data/*.jpg
+data/*.jpeg
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+data/*.log
+
+# stray npm cruft (not a node project)
+node_modules/
+package*.json

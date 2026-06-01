@@ -1,0 +1,91 @@
+# =============================================================================
+# Public-Space Vibe Analytics -- configuration
+# Every value has a safe default in src/config.py, so you only need to override
+# what you care about. The most important line is stream.source (below).
+# =============================================================================
+
+stream:
+  # Where the video comes from. Detected by pattern:
+  #   "https://www.youtube.com/watch?v=..."  -> YouTube live (resolved with yt-dlp)
+  #   "https://.../playlist.m3u8"            -> direct HLS stream (many public webcams)
+  #   "rtsp://..."                           -> IP / traffic camera
+  #   "0"                                    -> local webcam (index 0)
+  #   "data/sample_walk.mp4"                 -> a local video file (offline testing)
+  #
+  # Easiest is to pick a named preset from the list below instead of pasting a
+  # URL here: run `python main.py --pick`. Live URLs rotate, so confirm any new
+  # one with `python tests/check_stream.py --source "<URL>"` first.
+  source: "https://www.youtube.com/watch?v=gFRtAAmiFbE"   # default: shinjuku (see presets below)
+  process_width: 960        # frames are resized to this width before processing (speed/consistency)
+  target_fps: 0             # 0 = process as fast as possible; e.g. 10 = cap to 10 fps (saves CPU)
+  reconnect_delay: 5        # seconds to wait before re-opening a dropped livestream
+
+# Named source presets for the picker (python main.py --pick / --list-sources /
+# --source <name>). --source also accepts any raw URL, file path or webcam index.
+sources:
+  - name: shinjuku
+    url: "https://www.youtube.com/watch?v=gFRtAAmiFbE"
+    note: "Shinjuku/Kabukicho night street, Tokyo. Dense foot traffic; best for crowd analytics."
+  - name: kabukicho
+    url: "https://www.youtube.com/watch?v=DjdUEyjx8GM"
+    note: "Kabukicho, Shinjuku, Tokyo (different angle). Busy night street."
+  - name: shibuya
+    url: "https://www.youtube.com/watch?v=pM_NifRh0RQ"
+    note: "Shibuya scramble crossing, Tokyo. Busy at peak hours; has an on-screen AI overlay."
+  - name: kusatsu
+    url: "https://www.youtube.com/watch?v=GrEEoEmmrKs"
+    note: "Kusatsu onsen town, Japan. Scenic and usually sparse; a quiet-scene contrast."
+  - name: nyc_skyline
+    url: "https://www.youtube.com/watch?v=VGnFLdQW39A"
+    note: "NYC rooftop skyline. No people in frame; lighting/scene demos only."
+  - name: watertown
+    url: "https://www.youtube.com/watch?v=Zz9hMrxl20I"
+    note: "Public square, Watertown NY. Backup; often empty."
+  - name: webcam
+    url: "0"
+    note: "Local webcam (index 0). Fully offline."
+  - name: sample
+    url: "data/sample_walk.mp4"
+    note: "Bundled clip. Fully offline demo; loops."
+
+detector:
+  backend: "auto"           # auto | yolo | hog   (auto = YOLO if available, else HOG fallback)
+  model: "yolov8n.pt"       # nano model: small + fast. yolov8s.pt is more accurate but slower.
+  conf: 0.35                # detection confidence threshold
+  device: ""                # "" auto, "cpu", or "0" for first CUDA GPU
+  tracker: "bytetrack.yaml" # ultralytics tracker config (gives persistent IDs for dwell time)
+
+features:
+  aggregation_seconds: 5     # one aggregated metrics row is written every N seconds
+  dwell_exit_timeout: 3.0    # a tracked person absent this long is counted as "left"
+  group_distance_frac: 0.08  # two people closer than this (fraction of frame width) = same group
+  capacity: 25               # the crowd size considered "full" -- used to normalise the vibe index
+
+events:
+  baseline_window: 60        # how many recent metric rows form the rolling baseline
+  spike_zscore: 2.0          # crowd_spike / crowd_drop fire beyond this many std-devs from baseline
+  spike_min_jump: 3          # ...and only if the count changed by at least this many people
+  high_density: 20           # absolute person count that triggers a high_density event
+  quiet_motion: 0.01         # motion level below which the scene counts as "quiet"
+  quiet_windows: 6           # number of consecutive quiet windows before a quiet_period event
+  loiter_seconds: 120        # a single person tracked longer than this triggers a loiter event
+  cooldown_seconds: 20       # minimum gap between two events of the same type (anti-spam)
+  light_min_windows: 3       # a new lighting state must persist this many windows before a
+                             # lighting_change fires (debounce -- kills boundary flicker)
+
+storage:
+  out_dir: "data"
+  sqlite_db: "public_space.db"
+  metrics_csv: "metrics.csv"
+  events_csv: "events.csv"
+  heatmap_every_seconds: 30  # how often the hotspot heatmap PNG snapshot is refreshed
+
+mqtt:                        # OPTIONAL -- the "IoT pipeline" story (Part 5). Off by default.
+  enabled: false
+  host: "localhost"
+  port: 1883
+  topic_prefix: "publicspace"
+
+display:
+  show_window: true          # show the live annotated OpenCV window (turn off for headless servers)
+  show_heatmap_overlay: true # blend the live hotspot heatmap onto the video
